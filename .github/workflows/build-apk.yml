@@ -5,38 +5,76 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Allows manual triggering from the GitHub Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    name: Build Debug APK
+  build-apk:
+    name: Assemble Aegis Lock APK
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout the repository code
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 2. Set up JDK (Java Development Kit) - Version 17 is standard for modern Android projects
-      - name: Set up JDK 17
+      - name: Set up JDK 21 (Required for AGP 9.1.1 & Gradle 9.3.1)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
-          cache: 'gradle' # Caches gradle dependencies to speed up subsequent builds
+          java-version: '21'
 
-      # 3. Grant execution permissions to the Gradle wrapper script
-      - name: Make Gradle Wrapper Executable
-        run: chmod +x ./gradlew
+      - name: Set up Android SDK & Accept Licenses
+        uses: android-actions/setup-android@v3
 
-      # 4. Build the Debug APK using Gradle
-      - name: Build Debug APK with Gradle
-        run: ./gradlew assembleDebug
+      - name: Accept All Android SDK Licenses (for API 36.1 auto-download)
+        run: |
+          yes | sdkmanager --licenses || true
 
-      # 5. Upload the generated APK so you can download it from the GitHub UI
-      - name: Upload APK Artifact
+      - name: Restore debug.keystore from debug.keystore.base64
+        run: |
+          if [ -f "debug.keystore.base64" ]; then
+            tr -d '\n\r ' < debug.keystore.base64 | base64 -d > debug.keystore
+            echo "Restored debug.keystore from debug.keystore.base64"
+          else
+            keytool -genkeypair -v \
+              -keystore debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug.keystore via keytool"
+          fi
+          ls -la debug.keystore
+
+      - name: Ensure .env file exists for Secrets Gradle Plugin
+        run: |
+          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
+            cp .env.example .env
+          fi
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Build Signed Debug APK
+        run: |
+          gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Verify Built APK Output
+        run: |
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Aegis-Lock.apk
+
+      - name: Upload Aegis-Lock APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30 # Adjust how long you want to keep the artifact
+          name: Aegis-Lock-APK
+          path: app/build/outputs/apk/debug/Aegis-Lock.apk
+          if-no-files-found: error
+          retention-days: 30
