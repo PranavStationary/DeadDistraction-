@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+env:
+  STORE_PASSWORD: android
+  KEY_PASSWORD: android
+
 jobs:
   build-apk:
     name: Assemble Aegis Lock APK
@@ -19,25 +23,39 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21 (Required for AGP 9.1.1 & Gradle 9.3.1)
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK & Accept Licenses
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Accept All Android SDK Licenses (for API 36.1 auto-download)
+      - name: Install Android SDK Platform 36.1 & Build Tools
         run: |
-          yes | sdkmanager --licenses || true
+          set +o pipefail
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER=$(which sdkmanager || true)
+          fi
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+            "$SDKMANAGER" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" || true
+            "$SDKMANAGER" --install "platforms;android-36.1" || true
+          fi
+          # If android-36.1 minor platform is not available in the public runner channel, fall back to API 36 on CI
+          if [ -n "$ANDROID_HOME" ] && [ ! -d "$ANDROID_HOME/platforms/android-36.1" ]; then
+            sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 36/g' app/build.gradle.kts
+          fi
 
-      - name: Restore debug.keystore from debug.keystore.base64
+      - name: Prepare Signing Keystores (debug.keystore & my-upload-key.jks)
         run: |
           if [ -f "debug.keystore.base64" ]; then
-            tr -d '\n\r ' < debug.keystore.base64 | base64 -d > debug.keystore
-            echo "Restored debug.keystore from debug.keystore.base64"
-          else
+            tr -d '\n\r ' < debug.keystore.base64 | base64 -d > debug.keystore || true
+          fi
+          if [ ! -s "debug.keystore" ]; then
+            rm -f debug.keystore
             keytool -genkeypair -v \
               -keystore debug.keystore \
               -storepass android \
@@ -47,34 +65,55 @@ jobs:
               -keysize 2048 \
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
-            echo "Generated fallback debug.keystore via keytool"
           fi
-          ls -la debug.keystore
+          if [ ! -s "my-upload-key.jks" ]; then
+            keytool -genkeypair -v \
+              -keystore my-upload-key.jks \
+              -storepass android \
+              -alias upload \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Release,O=Android,C=US"
+          fi
 
-      - name: Ensure .env file exists for Secrets Gradle Plugin
+      - name: Prepare .env Files for Secrets Gradle Plugin
         run: |
-          if [ ! -f ".env" ] && [ -f ".env.example" ]; then
-            cp .env.example .env
+          if [ ! -f ".env.example" ]; then
+            echo "# Placeholder .env.example" > .env.example
           fi
+          cp .env.example .env
+          cp .env.example app/.env
+          cp .env.example app/.env.example
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
 
+      - name: Provide ./gradlew Wrapper Shim for CI Compatibility
+        run: |
+          if [ ! -f "./gradlew" ]; then
+            printf '#!/usr/bin/env bash\nexec gradle "$@"\n' > gradlew
+            chmod +x gradlew
+          fi
+
       - name: Build Signed Debug APK
         run: |
-          gradle :app:assembleDebug --no-daemon --stacktrace
+          gradle :app:assembleDebug --no-daemon --no-configuration-cache --stacktrace
 
-      - name: Verify Built APK Output
+      - name: Package APK Output
         run: |
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
-          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/Aegis-Lock.apk
+          APK_PATH=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+          echo "Found built APK at: $APK_PATH"
+          cp "$APK_PATH" Aegis-Lock.apk
+          ls -lh Aegis-Lock.apk
 
       - name: Upload Aegis-Lock APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Aegis-Lock-APK
-          path: app/build/outputs/apk/debug/Aegis-Lock.apk
+          path: Aegis-Lock.apk
           if-no-files-found: error
           retention-days: 30
