@@ -1,0 +1,6 @@
+{
+  "name": "Aegis Lock",
+  "description": "100% offline distraction blocker and full-phone lockdown fortress with Guardian Passcode, anti-uninstall protection, and fluid iOS-inspired animations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Aegis Lock</string>
+    <string name="accessibility_service_label">Aegis Lock Distraction Shield</string>
+    <string name="accessibility_service_description">Monitors active foreground apps locally on your device to enforce Partial App Shield (blocking social media like YouTube, Instagram, Facebook) and Full Phone Lockdown, and blocks Settings/Uninstall tampering while a Guardian Timer is active. Zero data leaves your device.</string>
+    <string name="device_admin_label">Aegis Anti-Uninstall Guard</string>
+    <string name="device_admin_description">Prevents Aegis Lock from being uninstalled while a focus timer or Guardian Passcode session is active.</string>
+    <string name="device_admin_disable_warning">Aegis Lock protection prevents uninstallation during active distraction locks.</string>
+</resources>
